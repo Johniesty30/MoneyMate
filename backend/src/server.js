@@ -5,6 +5,7 @@ import cors from 'cors';
 import { connectDb } from './config/db.js';
 import userRoutes from './routes/userRoutes.js';
 import transactionRoutes from './routes/transactionRoute.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 dotenv.config();
 
@@ -13,6 +14,7 @@ const PORT = process.env.PORT || 3000;
 
 //middleware
 app.use(express.json());
+app.use(errorHandler);
 app.use(cors());
 
 //routes

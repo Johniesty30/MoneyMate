@@ -1,182 +1,143 @@
 import Transaction from '../models/transactionModel.js';
+import { ApiError } from '../utils/ApiError.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
-const createTransaction = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
+// Create Transaction
+const createTransaction = asyncHandler(async (req, res, next) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
 
-    const userId = req.user._id;
-    let { amount, type, category, date, description } = req.body;
+  const { amount, type, category, date, description } = req.body;
 
-    if (amount === undefined || !type || !category) {
-      return res  
-        .status(400)
-        .json({ message: 'amount, type, and category are required' });
-    }
-
-    amount = Number(amount);
-    if (Number.isNaN(amount)) {
-      return res.status(400).json({ message: 'Invalid amount' });
-    }
-
-    date = date ? new Date(date) : new Date();
-    if (isNaN(date.getTime())) {
-      return res.status(400).json({ message: 'Invalid date' });
-    }
-
-    const newTransaction = new Transaction({
-      userId,
-      amount,
-      type,
-      category,
-      date,
-      description,
-    });
-
-    const savedTransaction = await newTransaction.save();
-    res.status(201).json(savedTransaction);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to create transaction', error: error.message });
+  if (amount === undefined || !type || !category) {
+    throw new ApiError(400, 'amount, type, and category are required');
   }
-};
 
-const getTransactions = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-    const userId = req.user._id;
-    const transactions = await Transaction.find({ userId }).sort({ date: -1 });
-    if (transactions.length === 0) {
-      return res
-        .status(200)
-        .json({ message: 'No transactions found', transactions: [] });
-    }
-    res.status(200).json(transactions);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to fetch transactions', error: error.message });
+  const numAmount = Number(amount);
+  if (Number.isNaN(numAmount)) throw new ApiError(400, 'Invalid amount');
+
+  const transactionDate = date ? new Date(date) : new Date();
+  if (isNaN(transactionDate.getTime())) throw new ApiError(400, 'Invalid date');
+
+  const newTransaction = new Transaction({
+    userId: req.user._id,
+    amount: numAmount,
+    type,
+    category,
+    date: transactionDate,
+    description,
+  });
+
+  const savedTransaction = await newTransaction.save();
+  res.status(201).json({
+    message: 'Transaction Created Successfully',
+    transaction: savedTransaction,
+  });
+});
+
+// Get All Transactions
+const getTransactions = asyncHandler(async (req, res) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
+
+  const transactions = await Transaction.find({ userId: req.user._id }).sort({
+    date: -1,
+  });
+
+  if (transactions.length === 0) {
+    return res
+      .status(200)
+      .json({ message: 'No transactions found', transactions: [] });
   }
-};
 
-const getTransactionById = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-    const { id } = req.params;
-    const userId = req.user._id;
+  res.status(200).json(transactions);
+});
 
-    const transaction = await Transaction.findOne({ _id: id, userId });
-    if (!transaction)
-      return res.status(404).json({ message: 'Transaction not found' });
+// Get Transaction by ID
+const getTransactionById = asyncHandler(async (req, res) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
 
-    res.status(200).json(transaction);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to fetch transaction', error: error.message });
+  const transaction = await Transaction.findOne({
+    _id: req.params.id,
+    userId: req.user._id,
+  });
+  if (!transaction) throw new ApiError(404, 'Transaction not found');
+
+  res.status(200).json(transaction);
+});
+
+// Get Transactions by Month
+const getTransactionsByMonth = asyncHandler(async (req, res) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
+
+  const { year, month } = req.params;
+  const y = parseInt(year, 10);
+  const m = parseInt(month, 10);
+
+  if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) {
+    throw new ApiError(400, 'Invalid year or month');
   }
-};
 
-const getTransactionsByMonth = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-    const userId = req.user._id;
-    const { year, month } = req.params;
+  const startDate = new Date(y, m - 1, 1);
+  const endDate = new Date(y, m, 0, 23, 59, 59, 999);
 
-    const y = parseInt(year, 10);
-    const m = parseInt(month, 10);
-    if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) {
-      return res.status(400).json({ message: 'Invalid year or month' });
-    }
+  const transactions = await Transaction.find({
+    userId: req.user._id,
+    date: { $gte: startDate, $lte: endDate },
+  }).sort({ date: -1 });
 
-    const startDate = new Date(y, m - 1, 1);
-    // last millisecond of the last day of month m
-    const endDate = new Date(y, m, 0, 23, 59, 59, 999);
+  res.status(200).json(transactions);
+});
 
-    const transactions = await Transaction.find({
-      userId,
-      date: { $gte: startDate, $lte: endDate },
-    }).sort({ date: -1 });
+// Update Transaction
+const updateTransaction = asyncHandler(async (req, res) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
 
-    res.status(200).json(transactions);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to fetch transactions', error: error.message });
-  }
-};
+  const allowed = ['amount', 'type', 'category', 'date', 'description'];
+  const updates = {};
 
-const updateTransaction = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-    const { id } = req.params;
-    const userId = req.user._id;
-
-    // Allow only specific fields to be updated
-    const allowed = ['amount', 'type', 'category', 'date', 'description'];
-    const updates = {};
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) {
-        if (key === 'amount') {
-          const amt = Number(req.body[key]);
-          if (Number.isNaN(amt))
-            return res.status(400).json({ message: 'Invalid amount' });
-          updates.amount = amt;
-        } else if (key === 'date') {
-          const d = new Date(req.body.date);
-          if (isNaN(d.getTime()))
-            return res.status(400).json({ message: 'Invalid date' });
-          updates.date = d;
-        } else {
-          updates[key] = req.body[key];
-        }
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      if (key === 'amount') {
+        const amt = Number(req.body[key]);
+        if (Number.isNaN(amt)) throw new ApiError(400, 'Invalid amount');
+        updates.amount = amt;
+      } else if (key === 'date') {
+        const d = new Date(req.body.date);
+        if (isNaN(d.getTime())) throw new ApiError(400, 'Invalid date');
+        updates.date = d;
+      } else {
+        updates[key] = req.body[key];
       }
     }
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: 'No valid fields to update' });
-    }
-
-    const updatedTransaction = await Transaction.findOneAndUpdate(
-      { _id: id, userId },
-      { $set: updates },
-      { new: true }
-    );
-
-    if (!updatedTransaction) {
-      return res.status(404).json({ message: 'Transaction not found' });
-    }
-
-    res.status(200).json(updatedTransaction);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to update transaction', error: error.message });
   }
-};
 
-const deleteTransaction = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-    const { id } = req.params;
-    const userId = req.user._id;
-
-    const deletedTransaction = await Transaction.findOneAndDelete({
-      _id: id,
-      userId,
-    });
-
-    if (!deletedTransaction) {
-      return res.status(404).json({ message: 'Transaction not found' });
-    }
-
-    res.status(200).json({ message: 'Transaction deleted successfully' });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: 'Failed to delete transaction', error: error.message });
+  if (Object.keys(updates).length === 0) {
+    throw new ApiError(400, 'No valid fields to update');
   }
-};
+
+  const updatedTransaction = await Transaction.findOneAndUpdate(
+    { _id: req.params.id, userId: req.user._id },
+    { $set: updates },
+    { new: true }
+  );
+
+  if (!updatedTransaction) throw new ApiError(404, 'Transaction not found');
+
+  res.status(200).json(updatedTransaction);
+});
+
+// Delete Transaction
+const deleteTransaction = asyncHandler(async (req, res) => {
+  if (!req.user) throw new ApiError(401, 'Unauthorized');
+
+  const deletedTransaction = await Transaction.findOneAndDelete({
+    _id: req.params.id,
+    userId: req.user._id,
+  });
+
+  if (!deletedTransaction) throw new ApiError(404, 'Transaction not found');
+
+  res.status(200).json({ message: 'Transaction deleted successfully' });
+});
 
 export {
   createTransaction,
